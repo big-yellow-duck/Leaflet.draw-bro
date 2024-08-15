@@ -8392,6 +8392,7 @@ var Polygon = Polyline.extend({
 		if (len >= 2 && result[0] instanceof LatLng && result[0].equals(result[len - 1])) {
 			result.pop();
 		}
+		console.log('poly convet lat lngs result: ', result)
 		return result;
 	},
 

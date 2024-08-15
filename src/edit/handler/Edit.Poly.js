@@ -16,6 +16,9 @@ L.Edit.Poly = L.Handler.extend({
 		this._poly = poly;
 
 		this._poly.on("revert-edited", this._updateLatLngs, this);
+		// this._poly.LatLngUtil.
+		// when init poly
+		console.log("init edit poly: ", poly);
 	},
 
 	// Compatibility method to normalize Poly* objects
@@ -60,7 +63,9 @@ L.Edit.Poly = L.Handler.extend({
 		});
 	},
 
+	//init handlers are called for every polygon
 	_initHandlers: function () {
+		// console.log("init use latlngs", this.latlngs);
 		this._verticesHandlers = [];
 		for (var i = 0; i < this.latlngs.length; i++) {
 			this._verticesHandlers.push(
@@ -71,6 +76,7 @@ L.Edit.Poly = L.Handler.extend({
 				)
 			);
 		}
+		console.log("vertice handlers: ", this._verticesHandlers.length);
 	},
 
 	_updateLatLngs: function (e) {
@@ -108,6 +114,8 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			this.options.icon = this.options.touchIcon;
 		}
 		this._poly = poly;
+		// console.log('this poly: ', poly)
+		// console.log('poly holes: ', poly._holes)
 
 		if (options && options.drawError) {
 			options.drawError = L.Util.extend(
@@ -213,52 +221,68 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			this._markerGroup = new L.LayerGroup();
 		}
 		this._markers = [];
-
+		this._markerArray = [];
 		var latlngs = this._defaultShape(),
-			i,
-			j,
+			// i,
+			// j,
 			len,
 			marker;
 
-	
+		var markerLeft, markerRight;
 		// current polygon can have nested polygons so we take account of this
 		currentPolygonLatLngArray = this._latlngs;
-		// console.log("current polygon lat lng arr: ", currentPolygonLatLngArray);
 
+		console.log("current polygon array: ", currentPolygonLatLngArray);
+		// console.log('current polygon alt: ', this._latlngs.alt)
+		// console.log('default shape alt: ', this._defaultShape())
+
+		//handle case where polygons have holes and no holes
 		var self = this; // Store reference to 'this'
-		currentPolygonLatLngArray.forEach(function (innerpolygon) {
-			// console.log("innerpolygon: ", innerpolygon);
-			for (i = 0, len = innerpolygon.length; i < len; i++) {
-				marker = self._createMarker(innerpolygon[i], i);
+		var markerIndexOffset = 0;
+		// console.log("poly has holes");
+		for (i = 0; i < currentPolygonLatLngArray.length; i++) {
+			var subPolygonGroups = [];
+			for (j = 0; j < currentPolygonLatLngArray[i].length; j++) {
+				marker = self._createMarker(
+					currentPolygonLatLngArray[i][j],
+					j + markerIndexOffset
+				);
 				marker.on("click", self._onMarkerClick, self);
 				marker.on("contextmenu", self._onContextMenu, self);
 				self._markers.push(marker);
+				console.log("marker indices: ", j + markerIndexOffset);
+				subPolygonGroups.push(marker);
+			}
+			markerIndexOffset += currentPolygonLatLngArray[i].length;
+			this._markerArray.push(subPolygonGroups);
+		}
+
+		// create middle markers
+		// TODO: dont use markerarray to generate markers, use this._latlngs instead
+		this._markerArray.forEach(function (polyMarkers) {
+			for (i = 0, j = polyMarkers.length - 1; i < polyMarkers.length; j = i++) {
+				markerRight = polyMarkers[i];
+				markerLeft = polyMarkers[j];
+				console.log(
+					"marker right: ",
+					polyMarkers[i]._index,
+					"marker left: ",
+					polyMarkers[j]._index
+				);
+				self._createMiddleMarker(markerLeft, markerRight);
+				self._updatePrevNext(markerLeft, markerRight);
 			}
 		});
-
-		for (i = 0, len = latlngs.length; i < len; i++) {
-			marker = this._createMarker(latlngs[i], i);
-			marker.on("click", this._onMarkerClick, this);
-			marker.on("contextmenu", this._onContextMenu, this);
-			this._markers.push(marker);
-		}
-
-		var markerLeft, markerRight;
-
-		for (i = 0, j = len - 1; i < len; j = i++) {
-			if (i === 0 && !(L.Polygon && this._poly instanceof L.Polygon)) {
-				continue;
-			}
-
-			markerLeft = this._markers[j];
-			markerRight = this._markers[i];
-
-			this._createMiddleMarker(markerLeft, markerRight);
-			this._updatePrevNext(markerLeft, markerRight);
-		}
 	},
 
 	_createMarker: function (latlng, index) {
+		/**
+		 * Creates a new marker at the specified location and adds it to the marker group.
+		 *
+		 * @param {L.LatLng} latlng - The location of the marker.
+		 * @param {number} index - The index of the marker.
+		 * @return {L.Marker} The created marker.
+		 */
 		// Extending L.Marker in TouchEvents.js to include touch.
 		var marker = new L.Marker.Touch(latlng, {
 			draggable: true,
@@ -286,11 +310,42 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		this._poly.fire("editstart");
 	},
 
+	// updated spliceLatLngs to handle mpolygon with hole
 	_spliceLatLngs: function () {
-		var latlngs = this._defaultShape();
+		var latlngs = [];
+		console.log("spliceLatLngs args: ", arguments);
+		// console.log('inner poly latlngs: ', this._latlngs[1])
+		// create index range
+		var indexRangeCummulative = [];
+		var indexCummulative = 0;
+
+		for (i = 0; i < this._latlngs.length; i++) {
+			indexRangeCummulative.push(this._latlngs[i].length + indexCummulative);
+			indexCummulative += this._latlngs[i].length;
+		}
+		console.log(indexRangeCummulative);
+
+		if (arguments[0] < this._latlngs[0].length) {
+			latlngs = this._latlngs[0];
+		} else {
+			for (i = 1; i < indexRangeCummulative.length; i++) {
+				if (
+					arguments[0] >= indexRangeCummulative[i - 1] &&
+					arguments[0] < indexRangeCummulative[i]
+				) {
+					latlngs = this._latlngs[i];
+					arguments[0] -= indexRangeCummulative[i - 1];
+				}
+			}
+		}
+
 		var removed = [].splice.apply(latlngs, arguments);
-		this._poly._convertLatLngs(latlngs, true);
+
+		// insert point marker into latlngs
+		convertedlatlngs = this._poly._convertLatLngs(this._latlngs, true);
+
 		this._poly.redraw();
+		console.log("splice remove: ", removed);
 		return removed;
 	},
 
@@ -461,12 +516,14 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 
 		marker1._middleRight = marker2._middleLeft = marker;
 
+		// update the dragstart function to hangle multipolygon
 		onDragStart = function () {
 			marker.off("touchmove", onDragStart, this);
+			//check marker2 and marker1 index first
 			var i = marker2._index;
-
+			console.log("latlng when dragged: ", this._latlngs);
 			marker._index = i;
-
+			console.log("drag marker index: ", i);
 			marker.off("click", onClick, this).on("click", this._onMarkerClick, this);
 
 			latlng.lat = marker.getLatLng().lat;
@@ -474,6 +531,11 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			this._spliceLatLngs(i, 0, latlng);
 			this._markers.splice(i, 0, marker);
 
+			// markerIndices = this._markers;
+			// markerIndices.forEach(function (marker) {
+			// 	console.log("marker index: ", marker._index);
+			// });
+			// console.log("maker indices: ", markerIndices);
 			marker.setOpacity(1);
 
 			this._updateIndexes(i, 1);
